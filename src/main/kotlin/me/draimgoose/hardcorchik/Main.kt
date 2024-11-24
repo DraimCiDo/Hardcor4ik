@@ -1,71 +1,100 @@
 package me.draimgoose.hardcorchik
 
 import org.bukkit.Bukkit
+import org.bukkit.GameMode
 import org.bukkit.World
 import org.bukkit.WorldCreator
-import org.bukkit.event.EventHandler
-import org.bukkit.event.Listener
-import org.bukkit.event.entity.PlayerDeathEvent
+import org.bukkit.command.Command
+import org.bukkit.command.CommandSender
+import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import java.io.File
 
-class Main : JavaPlugin(), Listener {
+class Main : JavaPlugin() {
+    private var attemptCount = 0 // Счётчик попыток
 
     override fun onEnable() {
-        // Plugin startup logic
-        server.pluginManager.registerEvents(this, this)
-        logger.info("Hardcor4ik успешно запущен.")
+        logger.info("Hardcorchik плагин включён!")
     }
 
     override fun onDisable() {
-        // Plugin shutdown logic
-        logger.info("Hardcor4ik успешно отключен.")
+        logger.info("Hardcorchik плагин отключён!")
     }
 
-    @EventHandler
-    fun onPlayerDeath(event: PlayerDeathEvent) {
-        val player = event.entity
-        val world = player.world
-
-        // Проверяем, что мир в хардкорном режиме
-        if (world.isHardcore) {
-            // Уведомляем игроков о сбросе мира
-            Bukkit.broadcastMessage("Игрок ${player.name} погиб в хардкорном мире! Мир будет сброшен...")
-
-            // Задержка перед сбросом мира
-            Bukkit.getScheduler().runTaskLater(this, Runnable {
-                resetWorld(world.name) // Передаём имя мира
-            }, 100L) // 5 секунд (100 тиков)
+    override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
+        if (command.name.equals("resetworld", ignoreCase = true)) {
+            if (sender is Player) {
+                resetWorld(sender.world.name)
+                sender.sendMessage("Мир был сброшен! Удачи в следующей попытке.")
+            } else {
+                sender.sendMessage("Эту команду может использовать только игрок!")
+            }
+            return true
         }
+        return false
     }
 
-    private fun resetWorld(worldName: String) {
-        val worldFolder = File(worldName)
+    private fun resetWorld(oldWorldName: String) {
+        attemptCount++
 
-        // Удаляем текущий мир
-        if (worldFolder.exists()) {
-            Bukkit.getOnlinePlayers().forEach { it.kickPlayer("Мир сбрасывается!") }
-            Bukkit.unloadWorld(worldName, false)
-            worldFolder.deleteRecursively()
-        }
+        // Уникальное имя для нового мира
+        val newWorldName = "world_${System.currentTimeMillis()}"
 
-        // Создаем новый мир
-        val newWorld: World? = WorldCreator(worldName).createWorld()
+        // Удаляем старый мир
+        deleteOldWorld(oldWorldName)
 
+        // Создаём новый мир
+        val newWorld: World? = WorldCreator(newWorldName).createWorld()
         if (newWorld == null) {
-            // Если мир не удалось создать, логируем ошибку и уведомляем игроков
-            logger.severe("Не удалось создать мир с именем $worldName!")
-            Bukkit.broadcastMessage("Произошла ошибка при сбросе мира!")
+            logger.severe("Не удалось создать новый мир с именем $newWorldName!")
+            Bukkit.broadcastMessage("Произошла ошибка при создании нового мира!")
             return
         }
 
-        // Телепортируем игроков в новый мир
-        Bukkit.getScheduler().runTask(this, Runnable {
-            Bukkit.getOnlinePlayers().forEach { player ->
-                player.teleport(newWorld.spawnLocation)
-            }
-        })
+        // Телепортируем игроков в новый мир и восстанавливаем их состояние
+        Bukkit.getOnlinePlayers().forEach { player ->
+            resetPlayerState(player, newWorld)
+        }
 
-        Bukkit.broadcastMessage("Мир был успешно сброшен и создан заново!")
+        Bukkit.broadcastMessage("Мир был успешно сброшен! Попытка #$attemptCount началась.")
+    }
+
+    private fun deleteOldWorld(worldName: String) {
+        val world = Bukkit.getWorld(worldName)
+        if (world != null) {
+            Bukkit.unloadWorld(world, false) // Выгружаем мир из памяти
+        }
+
+        val worldFolder = File(worldName)
+        if (worldFolder.exists()) {
+            worldFolder.deleteRecursively() // Удаляем папку мира
+            logger.info("Старый мир $worldName успешно удалён.")
+        } else {
+            logger.warning("Папка мира $worldName не найдена.")
+        }
+    }
+
+    private fun resetPlayerState(player: Player, newWorld: World) {
+        // Телепортируем игрока в новый мир
+        player.teleport(newWorld.spawnLocation)
+
+        // Устанавливаем режим выживания
+        if (player.gameMode != GameMode.SURVIVAL) {
+            player.gameMode = GameMode.SURVIVAL
+        }
+
+        // Сбрасываем здоровье и сытость
+        player.health = 20.0
+        player.foodLevel = 20
+
+        // Очищаем инвентарь
+        player.inventory.clear()
+
+        // Сбрасываем опыт
+        player.exp = 0f
+        player.level = 0
+
+        // Уведомляем игрока
+        player.sendMessage("Вы начали новую попытку! Удачи!")
     }
 }
