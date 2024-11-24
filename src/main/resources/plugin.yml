@@ -1,5 +1,5 @@
 name: Hardcorchik
-version: '0.0.1'
+version: '0.0.3'
 main: me.draimgoose.hardcorchik.Main
 api-version: '1.21'
 authors: [ DraimGooSe ]
